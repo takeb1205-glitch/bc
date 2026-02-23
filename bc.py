@@ -47,17 +47,16 @@ def get_nasdaq_info(ticker_symbol):
     except Exception as e:
         return '<div class="nasdaq-value" style="color:#F6465D;">연결 오류 (재시도 중)</div>'
 
-# 3. 코인 및 환율 데이터 호출 함수 (🔥 바이낸스 집중 강화)
+# 3. 코인 및 환율 데이터 호출 함수 (🔥 코인베이스로 교체)
 def fetch_market_data():
     results = {
         "upbit": 0.0, 
-        "binance": 0.0, 
+        "coinbase": 0.0, # 바이낸스 대신 코인베이스 변수 사용
         "premium": 0.0, 
         "rate": 1400.0,  
         "update": datetime.now().strftime('%H:%M:%S')
     }
     
-    # 일반 PC 브라우저로 완벽히 위장하는 헤더
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 
     # A. 실시간 환율
@@ -73,32 +72,21 @@ def fetch_market_data():
         results["upbit"] = float(u_res[0]['trade_price'])
     except: pass
 
-    # C. 🔥 바이낸스 코인 (다중 서버 우회 접속)
-    # 한 곳이 막히면 다음 서버로 즉시 찔러보도록 4개의 주소를 준비했습니다.
-    binance_endpoints = [
-        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api2.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        "https://api3.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-    ]
-    
-    for url in binance_endpoints:
-        try:
-            b_res = requests.get(url, headers=headers, timeout=4).json()
-            if 'price' in b_res:
-                results["binance"] = float(b_res['price'])
-                break  # 정상적으로 데이터를 가져오면 반복문을 즉시 탈출
-        except:
-            continue
+    # C. 🔥 코인베이스 코인 (바이낸스 대체, API 접근이 훨씬 유연합니다)
+    try:
+        cb_res = requests.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", headers=headers, timeout=4).json()
+        if 'data' in cb_res and 'amount' in cb_res['data']:
+            results["coinbase"] = float(cb_res['data']['amount'])
+    except: pass
 
-    # D. 프리미엄 계산 (둘 다 정상적으로 불러와졌을 때만 계산)
-    if results["upbit"] > 0 and results["binance"] > 0:
-        krw_binance = results["binance"] * results["rate"]
-        results["premium"] = ((results["upbit"] / krw_binance) - 1) * 100
+    # D. 프리미엄 계산
+    if results["upbit"] > 0 and results["coinbase"] > 0:
+        krw_coinbase = results["coinbase"] * results["rate"]
+        results["premium"] = ((results["upbit"] / krw_coinbase) - 1) * 100
 
     return results
 
-# 4. 화면 UI 렌더링 (기존 완벽 유지)
+# 4. 화면 UI 렌더링 (COINBASE로 텍스트 변경)
 data = fetch_market_data()
 
 col1, col2 = st.columns(2)
@@ -107,7 +95,7 @@ with col1:
     st.metric("K-PREMIUM", f"{data['premium']:+.2f} %")
     
 with col2:
-    st.metric("BINANCE BTC", f"$ {data['binance']:,.2f}")
+    st.metric("COINBASE BTC", f"$ {data['coinbase']:,.2f}") # 라벨 변경
     st.metric("REALTIME EXCHANGE RATE", f"{data['rate']:,.2f} KRW")
 
 st.divider()
@@ -129,6 +117,6 @@ st.markdown(f"""
 
 st.caption(f"Last Update: {data['update']} (15s Auto Refresh)")
 
-# 5. 자동 새로고침 방어 로직
+# 5. 자동 새로고침
 time.sleep(15)
 st.rerun()
