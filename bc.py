@@ -26,31 +26,49 @@ st.title("🚀 Market Monitor")
 # 2. 데이터 호출 함수
 def get_nasdaq_info(ticker_symbol):
     try:
+        # 실시간성 확보를 위해 history 사용
         tk = yf.Ticker(ticker_symbol)
-        # 실시간 가격 및 전일 종가 가져오기
-        fast = tk.fast_info
-        current_price = fast['last_price']
-        prev_close = fast['previous_close']
-        
-        change = current_price - prev_close
-        change_pct = (change / prev_close) * 100
-        
-        color_class = "up" if change >= 0 else "down"
-        arrow = "▲" if change >= 0 else "▼"
-        
-        return f'<div class="nasdaq-value {color_class}">{current_price:,.2f} ({change:+,.2f} {change_pct:+.2f}% {arrow})</div>'
+        hist = tk.history(period="2d")
+        if not hist.empty:
+            current_price = hist['Close'].iloc[-1]
+            prev_close = hist['Close'].iloc[-2]
+            
+            change = current_price - prev_close
+            change_pct = (change / prev_close) * 100
+            
+            color_class = "up" if change >= 0 else "down"
+            arrow = "▲" if change >= 0 else "▼"
+            
+            return f'<div class="nasdaq-value {color_class}">{current_price:,.2f} ({change:+,.2f} {change_pct:+.2f}% {arrow})</div>'
     except:
         return '<div class="nasdaq-value" style="color:white;">Data N/A</div>'
 
 def fetch_market_data():
-    results = {"upbit": 0.0, "binance": 0.0, "premium": 0.0, "update": datetime.now().strftime('%H:%M:%S')}
+    # 초기값 설정 (환율 기본값 포함)
+    results = {
+        "upbit": 0.0, 
+        "binance": 0.0, 
+        "premium": 0.0, 
+        "rate": 1400.0, 
+        "update": datetime.now().strftime('%H:%M:%S')
+    }
     try:
-        # 코인 데이터
+        # A. 실시간 환율 호출
+        rate_res = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5).json()
+        if rate_res.get('result') == 'success':
+            results["rate"] = float(rate_res['rates']['KRW'])
+
+        # B. 코인 데이터 호출
         u_res = requests.get("https://api.upbit.com/v1/ticker?markets=KRW-BTC", timeout=5).json()
         results["upbit"] = float(u_res[0]['trade_price'])
+        
         b_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
         results["binance"] = float(b_res['price'])
-        results["premium"] = ((results["upbit"] / (results["binance"] * 1400.0)) - 1) * 100
+        
+        # C. 실시간 환율을 적용한 김치 프리미엄 계산
+        if results["binance"] > 0:
+            krw_binance = results["binance"] * results["rate"]
+            results["premium"] = ((results["upbit"] / krw_binance) - 1) * 100
     except:
         pass
     return results
@@ -64,7 +82,8 @@ with col1:
     st.metric("K-PREMIUM", f"{data['premium']:+.2f} %")
 with col2:
     st.metric("BINANCE BTC", f"$ {data['binance']:,.2f}")
-    st.metric("EXCHANGE RATE", "1,400.00")
+    # 화면에 실시간 환율 표시
+    st.metric("REALTIME EXCHANGE RATE", f"{data['rate']:,.2f} KRW")
 
 st.divider()
 st.subheader("📊 NASDAQ Realtime (YF)")
