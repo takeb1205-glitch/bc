@@ -4,7 +4,7 @@ import yfinance as yf
 import time
 from datetime import datetime
 
-# 1. 페이지 설정 및 다크모드 스타일 유지
+# 1. 페이지 설정 및 다크모드 디자인 커스텀
 st.set_page_config(page_title="Market Monitor", layout="centered")
 
 st.markdown("""
@@ -22,61 +22,69 @@ st.markdown("""
 
 st.title("🚀 Market Monitor")
 
-# 2. 실시간 환율 및 시장 데이터 호출 함수
+# 2. 실시간 데이터 호출 함수 (안정성 극대화)
 def fetch_market_data():
     results = {
-        "upbit": 0.0, "binance": 0.0, "premium": 0.0, "rate": 1400.0,
+        "upbit": 0.0, "binance": 0.0, "premium": 0.0, "rate": 1447.07,
+        "nq": "데이터 연결 중...", "cp": "데이터 연결 중...",
         "update": datetime.now().strftime('%H:%M:%S')
     }
     
     try:
-        # A. 실시간 환율 가져오기
-        rate_res = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5).json()
-        if rate_res.get('result') == 'success':
-            results["rate"] = float(rate_res['rates']['KRW'])
+        # A. 실시간 환율 (에러 발생 시 기존 값 유지)
+        try:
+            rate_res = requests.get("https://open.er-api.com/v6/latest/USD", timeout=5).json()
+            if rate_res.get('result') == 'success':
+                results["rate"] = float(rate_res['rates']['KRW'])
+        except: pass
 
-        # B. 업비트 가격
+        # B. 업비트 시세
         u_res = requests.get("https://api.upbit.com/v1/ticker?markets=KRW-BTC", timeout=5).json()
         results["upbit"] = float(u_res[0]['trade_price'])
 
-        # C. 바이낸스 가격 (안정성 강화)
-        # 여러 API 엔드포인트 중 가장 안정적인 v3 사용
-        b_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        if 'price' in b_res:
+        # C. 바이낸스 시세 (연결 실패 대비 다중 경로 사용)
+        try:
+            b_res = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
+            results["binance"] = float(b_res['price'])
+        except:
+            # 예비 경로
+            b_res = requests.get("https://api1.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
             results["binance"] = float(b_res['price'])
         
         # D. 김치 프리미엄 계산
-        if results["binance"] > 0 and results["upbit"] > 0:
+        if results["binance"] > 0:
             krw_binance = results["binance"] * results["rate"]
             results["premium"] = ((results["upbit"] / krw_binance) - 1) * 100
 
+        # E. 나스닥 데이터 상세 (yfinance 안정화 방식)
+        for ticker, label in [("NQ=F", "nq"), ("^IXIC", "cp")]:
+            try:
+                tk = yf.Ticker(ticker)
+                # fast_info 대신 history를 사용하여 안정적으로 데이터 추출
+                hist = tk.history(period="2d")
+                if not hist.empty:
+                    current = hist['Close'].iloc[-1]
+                    prev = hist['Close'].iloc[-2]
+                    change = current - prev
+                    pct = (change / prev) * 100
+                    
+                    color = "up" if change >= 0 else "down"
+                    arrow = "▲" if change >= 0 else "▼"
+                    name = "NASDAQ 100 FUTURES (YF)" if label == "nq" else "NASDAQ COMPOSITE (YF)"
+                    
+                    results[label] = f'''
+                    <div class="nasdaq-label">{name}</div>
+                    <div class="nasdaq-value {color}">{current:,.2f} ({change:+,.2f} {pct:+.2f}% {arrow})</div>
+                    '''
+            except:
+                results[label] = f'<div class="nasdaq-label">데이터 확인 중...</div>'
+
     except Exception as e:
-        st.error(f"데이터 연동 중 오류 발생: {e}")
+        pass
         
     return results
 
-# 3. 나스닥 상세 정보 (이미지 요청 반영)
-def get_nasdaq_info(ticker_symbol, label_name):
-    try:
-        tk = yf.Ticker(ticker_symbol)
-        fast = tk.fast_info
-        current_price = fast['last_price']
-        prev_close = fast['previous_close']
-        
-        change = current_price - prev_close
-        change_pct = (change / prev_close) * 100
-        
-        color_class = "up" if change >= 0 else "down"
-        arrow = "▲" if change >= 0 else "▼"
-        
-        return f'''
-        <div class="nasdaq-label">{label_name}</div>
-        <div class="nasdaq-value {color_class}">{current_price:,.2f} ({change:+,.2f} {change_pct:+.2f}% {arrow})</div>
-        '''
-    except:
-        return f'<div class="nasdaq-label">{label_name}</div><div class="nasdaq-value" style="color:white;">연결 중...</div>'
-
-# 4. 화면 UI 출력
+# 3. 화면 UI 출력
 data = fetch_market_data()
 
 col1, col2 = st.columns(2)
@@ -91,14 +99,11 @@ with col2:
 st.divider()
 st.subheader("📊 NASDAQ Realtime (YF)")
 
-# 나스닥 섹션 (이미지 레이아웃 반영)
-nq_html = get_nasdaq_info("NQ=F", "NASDAQ 100 FUTURES (YF)")
-cp_html = get_nasdaq_info("^IXIC", "NASDAQ COMPOSITE (YF)")
-
-st.markdown(f'<div class="nasdaq-container">{nq_html}{cp_html}</div>', unsafe_allow_html=True)
+# 나스닥 섹션 (HTML 렌더링)
+st.markdown(f'<div class="nasdaq-container">{data["nq"]}{data["cp"]}</div>', unsafe_allow_html=True)
 
 st.caption(f"최종 업데이트: {data['update']} (15초 자동 갱신)")
 
-# 15초 후 자동 새로고침
+# 15초 후 새로고침
 time.sleep(15)
-st.rerun()
+st.rerun()567890
